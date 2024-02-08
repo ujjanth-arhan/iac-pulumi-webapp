@@ -1,0 +1,38 @@
+name: pull-raised-tests
+
+run-name: pull-raised
+on:
+    pull_request:
+        paths:
+            - '**/*'
+
+jobs:
+    installations:
+        runs-on: ubuntu-latest
+        steps:
+            -   name: Checkout github actions
+                uses: actions/checkout@v4
+                
+            -   name: Install packer
+                run: |
+                    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+                    sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+                    sudo apt-get update && sudo apt-get install packer
+            
+            -   name: Check packer format
+                run: |
+                    pkrfmt=$(packer fmt ./packer | wc -l)
+                    if [ $pkrfmt -ne 0 ]; then exit 1; fi
+            
+            -   name: Run packer init
+                run: |
+                    packer init ./packer
+            
+            -   name: Check packer valid
+                run: |
+                    if ! packer validate ./packer; then exit 1; fi
+                env:
+                    PKR_VAR_source_ami: ${{ vars.SOURCE_AMI }}
+                    PKR_VAR_ssh_username: ${{ vars.SSH_USERNAME }}
+                    PKR_VAR_subnet_id: ${{ vars.SUBNET_ID }}
+            

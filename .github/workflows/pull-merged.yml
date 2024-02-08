@@ -1,0 +1,98 @@
+name: pull-merged-tests
+
+run-name: pull-merged
+on:
+    push:
+        branches:
+            - 'main'
+            - 'develop'
+        paths:
+            - '**/*'
+
+jobs:
+    packer-checks:
+        runs-on: ubuntu-latest
+        steps:
+            -   name: Checkout github actions
+                uses: actions/checkout@v4
+            
+            -   name: Configure AWS Credentials
+                uses: aws-actions/configure-aws-credentials@v4
+                with:
+                    aws-access-key-id: ${{ secrets.PKR_VAR_ACCESS_KEY }}
+                    aws-secret-access-key: ${{ secrets.PKR_VAR_SECRET_KEY }}
+                    aws-region: ${{ vars.PKR_VAR_AWS_REGION }}
+            
+            -   name: Setup go
+                uses: actions/setup-go@v4
+                with:
+                    go-version: '1.21.0'
+
+            -   name: Install go
+                run: go version
+                
+            -   name: Install postgres
+                run: |
+                    sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+                    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+                    sudo apt-get update
+                    sudo apt-get install postgresql-12 postgresql-client-12
+
+            -   name: Start PostgreSQL
+                run: sudo systemctl start postgresql
+
+            -   name: Change PostgresSQL password
+                run: |
+                    sudo su postgres -c "psql --command=\"ALTER USER postgres WITH PASSWORD 'password';\""
+
+            -   name: Create Users file
+                run: bash ./.github/workflows/create-users.sh
+
+            -   name: Create test environment variables
+                run: bash ./.github/workflows/test-env-vars.sh
+
+            -   name: Run integration tests
+                run: |
+                    go test ./tests/integration/
+            
+            -   name: Build go program
+                run: |
+                    go install .
+                    go build .
+                    sudo mv restful-api ./builds
+            
+            -   name: Create systemd service for web app
+                run: bash ./.github/workflows/cloud-course-service.sh
+
+            -   name: Cloud agent config file
+                run: bash ./.github/workflows/cloud-agent-config.sh
+            
+            -   name: Install packer
+                run: |
+                    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+                    sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+                    sudo apt-get update && sudo apt-get install packer
+                
+            -   name: Run packer init
+                run: |
+                    packer init ./packer
+            
+            -   name: Run packer file
+                run: |
+                    packer build ./packer
+                env:
+                    PKR_VAR_source_ami: ${{ vars.SOURCE_AMI }}
+                    PKR_VAR_ssh_username: ${{ vars.SSH_USERNAME }}
+                    PKR_VAR_subnet_id: ${{ vars.SUBNET_ID }}
+
+            -   name: Configure Demo AWS Credentials
+                uses: aws-actions/configure-aws-credentials@v4
+                with:
+                    aws-access-key-id: ${{ secrets.PKR_VAR_ACCESS_KEY_DEMO }}
+                    aws-secret-access-key: ${{ secrets.PKR_VAR_SECRET_KEY_DEMO }}
+                    aws-region: ${{ vars.PKR_VAR_AWS_REGION_DEMO }}
+            
+            -   name: Instance refresh
+                run: bash ./.github/workflows/instance-refresh.sh
+                    
+                    
